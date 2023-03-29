@@ -1,0 +1,76 @@
+{
+	"common": {
+		"name": "timesanddates",
+		"version": "0.0.1",
+		"news": {
+			"0.0.1": {
+				"en": "initial release",
+				"de": "Erstveröffentlichung",
+				"ru": "Начальная версия",
+				"pt": "lançamento inicial",
+				"nl": "Eerste uitgave",
+				"fr": "Première version",
+				"it": "Versione iniziale",
+				"es": "Versión inicial",
+				"pl": "Pierwsze wydanie",
+				"zh-cn": "首次出版"
+			}
+		},
+		"title": "Times and Dates",
+		"titleLang": {
+			"en": "Times and Dates",
+			"de": "Times and Dates",
+			"ru": "Times and Dates",
+			"pt": "Times and Dates",
+			"nl": "Times and Dates",
+			"fr": "Times and Dates",
+			"it": "Times and Dates",
+			"es": "Times and Dates",
+			"pl": "Times and Dates",
+			"zh-cn": "Times and Dates"
+		},
+		"desc": {
+			"en": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more",
+			"de": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more",
+			"ru": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more",
+			"pt": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more",
+			"nl": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more",
+			"fr": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more",
+			"it": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more",
+			"es": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more",
+			"pl": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more",
+			"zh-cn": "Shows astro times, date in different formats, calendar week, data on current month, year, day and much more"
+		},
+		"authors": ["Schmakus <schmakus@gmail.com>"],
+		"keywords": ["time", "date", "month", "week", "year", "astro"],
+		"license": "MIT",
+		"platform": "Javascript/Node.js",
+		"main": "main.js",
+		"icon": "timesanddates.png",
+		"enabled": true,
+		"extIcon": "https://raw.githubusercontent.com/Schmakus/ioBroker.timesanddates/main/admin/timesanddates.png",
+		"readme": "https://github.com/Schmakus/ioBroker.timesanddates/blob/main/README.md",
+		"loglevel": "info",
+		"mode": "daemon",
+		"type": "date-and-time",
+		"compact": true,
+		"connectionType": "local",
+		"dataSource": "poll",
+		"adminUI": {
+			"config": "json"
+		},
+		"dependencies": [
+			{
+				"js-controller": ">=3.3.22"
+			}
+		],
+		"globalDependencies": [
+			{
+				"admin": ">=5.1.13"
+			}
+		]
+	},
+	"native": {},
+	"objects": [],
+	"instanceObjects": []
+}
