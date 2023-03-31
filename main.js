@@ -9,11 +9,7 @@
 const utils = require("@iobroker/adapter-core");
 
 // Load your modules here, e.g.:
-/*
-const fs = require("fs");
-const util = require("util");
-const readFile = util.promisify(fs.readFile);
-*/
+const schedule = require("node-schedule");
 
 const objects = require("./lib/objects.js");
 class Timesanddates extends utils.Adapter {
@@ -37,15 +33,9 @@ class Timesanddates extends utils.Adapter {
 	 */
 	async onReady() {
 		try {
-			//const objectsString = await readFile(`${__dirname}/lib/objects.json`, { encoding: "utf-8" });
-			//const objects = JSON.parse(objectsString);
-
-			//this.log.debug(`json: ${JSON.stringify(objects)}`);
-			//this.log.debug(`js: ${JSON.stringify(objects2)}`);
-
 			await this.createObjects(objects);
 			await this.deleteNonExistentObjects(this.keepList);
-			this.log.debug(JSON.stringify(this.states));
+			await this.scheduleForTimes();
 		} catch (error) {
 			this.log.error(`Could not create objects: ${error}`);
 		}
@@ -57,11 +47,7 @@ class Timesanddates extends utils.Adapter {
 	 */
 	onUnload(callback) {
 		try {
-			// Here you must clear all timeouts or intervals that may still be active
-			// clearTimeout(timeout1);
-			// clearTimeout(timeout2);
-			// ...
-			// clearInterval(interval1);
+			schedule.gracefulShutdown();
 
 			callback();
 		} catch (e) {
@@ -85,14 +71,29 @@ class Timesanddates extends utils.Adapter {
 	}
 
 	/**
+	 * Schedule a job to run every minute to set the time.
+	 *
+	 * @async
+	 * @function
+	 * @returns {Promise<void>}
+	 */
+	async scheduleForTimes() {
+		const self = this;
+		this.scheduleForTimes = schedule.scheduleJob("* * * * *", async function () {
+			self.log.debug("[ scheduleForTime ] Diese Funktion wird jede Minute aufgerufen!");
+		});
+	}
+
+	/**
 	 * Creates objects recursively in the ioBroker object tree.
 	 *
+	 * @async
 	 * @param {Record<string, any>} objects - The objects to be created.
 	 * @param {string} [parent=""] - The parent object ID.
 	 * @returns {Promise<void>} - Resolves when all objects have been created.
 	 */
 	async createObjects(objects, parent) {
-		this.log.debug(`[ createObjects ] Reaching function with parent = "${parent}"`);
+		this.log.debug(`[ createObjects ] Reaching`);
 
 		for (const [key, value] of Object.entries(objects)) {
 			const objectKey = parent ? `${parent}.${key}` : key;
@@ -120,11 +121,12 @@ class Timesanddates extends utils.Adapter {
 	/**
 	 * Deletes objects that do not exist in the given keepList.
 	 *
+	 * @async
 	 * @param {string[]} keepList - An array of object IDs to keep.
 	 * @returns {Promise<void>} - A Promise that resolves after all objects have been deleted.
 	 */
 	async deleteNonExistentObjects(keepList) {
-		this.log.debug(`[ deleteNonExistentObjects ] Reaching function with keepList = "${JSON.stringify(keepList)}"`);
+		this.log.debug(`[ deleteNonExistentObjects ] Reaching`);
 		const allObjects = [];
 		const objects = await this.getAdapterObjectsAsync();
 		for (const o in objects) {
@@ -201,7 +203,6 @@ class Timesanddates extends utils.Adapter {
 	/**
 	 * Removes the adapter's namespace from a given ID.
 	 *
-	 * @function
 	 * @async
 	 * @param {string} id - The ID to remove the namespace from.
 	 * @returns {Promise<string>} The ID without the adapter's namespace.
