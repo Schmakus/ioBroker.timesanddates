@@ -10,6 +10,7 @@ const utils = require("@iobroker/adapter-core");
 
 // Load your modules here, e.g.:
 const schedule = require("node-schedule");
+const SunCalc = require("suncalc2");
 
 const objects = require("./lib/objects.js");
 class Timesanddates extends utils.Adapter {
@@ -35,7 +36,16 @@ class Timesanddates extends utils.Adapter {
 		try {
 			await this.createObjects(objects);
 			await this.deleteNonExistentObjects(this.keepList);
+			const latlng = await this.getSystemData();
+			this.log.debug(JSON.stringify(this.states));
+
+			if (latlng) {
+				//const astroEvents = await this.getAstroEvents();
+				//this.scheduleForAstro();
+			}
+
 			await this.scheduleForTimes();
+			await this.scheduleForDates();
 		} catch (error) {
 			this.log.error(`Could not create objects: ${error}`);
 		}
@@ -71,7 +81,7 @@ class Timesanddates extends utils.Adapter {
 	}
 
 	/**
-	 * Schedule a job to run every minute to set the time.
+	 * Schedule a job to run every minute to set the times.
 	 *
 	 * @async
 	 * @function
@@ -80,8 +90,77 @@ class Timesanddates extends utils.Adapter {
 	async scheduleForTimes() {
 		const self = this;
 		this.scheduleForTimes = schedule.scheduleJob("* * * * *", async function () {
-			self.log.debug("[ scheduleForTime ] Diese Funktion wird jede Minute aufgerufen!");
+			self.log.debug("[ scheduleForTimes ] Diese Funktion wird jede Minute aufgerufen!");
 		});
+	}
+
+	/**
+	 * Schedule a job to run every minute to set the dates.
+	 *
+	 * @async
+	 * @function
+	 * @returns {Promise<void>}
+	 */
+	async scheduleForDates() {
+		const self = this;
+		this.scheduleForDates = schedule.scheduleJob("* * * * *", async function () {
+			self.log.debug("[ scheduleForDates ] Diese Funktion wird jede Minute aufgerufen!");
+		});
+	}
+
+	/**
+	 * Schedule a job to run every minute to set the astro times.
+	 *
+	 * @async
+	 * @function
+	 * @returns {Promise<void>}
+	 */
+	async scheduleForAstro() {
+		const self = this;
+		this.scheduleForAstro = schedule.scheduleJob("* * * * *", async function () {
+			self.log.debug("[ scheduleForDates ] Set astro times");
+		});
+	}
+
+	/**
+	 * Schedule astro events
+	 * @returns {Promise<void>}
+	 */
+	async getAstroEvents() {
+		const times = SunCalc.getTimes(new Date(), this.latitude, this.longitude);
+
+		// Erstelle ein Array mit den Zeiten
+		const timeArray = Object.keys(times).map((key) => {
+			return { name: key, time: times[key] };
+		});
+
+		// Sortiere das Array nach der Uhrzeit
+		timeArray.sort((a, b) => {
+			return new Date(a.time).getTime() - new Date(b.time).getTime();
+		});
+
+		this.log.debug(`[ getAstroTimes ] ${JSON.stringify(timeArray)}`);
+
+		// Gehe alle Zeiten durch
+		timeArray.forEach((time) => {
+			this.log.debug(`[ getAstroTimes ] ${time.name}: ${time.time}`);
+		});
+
+		this.states["04-sunrise"].set("01:00", true);
+
+		for (let i = 0; i < timeArray.length; i++) {
+			const astroTime = timeArray[i].time;
+			const date = new Date(astroTime);
+			const timeString = date.toLocaleTimeString(); // "hh:mm:ss AM/PM"
+			// @ts-ignore
+			const [time] = timeString.split(" "); // ["hh:mm:ss", "AM/PM"]
+
+			const timeName = timeArray[i].name;
+			const stateIndex = (i + 1).toString().padStart(2, "0"); // Index des States z.B. "01", "02", "03"
+			const stateName = `${stateIndex}-${timeName}`; // ID des States z.B. "Astro.Times.01-nightEnd"
+
+			this.states[stateName].set(time, true);
+		}
 	}
 
 	/**
@@ -210,6 +289,43 @@ class Timesanddates extends utils.Adapter {
 	async removeNamespace(id) {
 		const re = new RegExp(this.namespace + "*\\.", "g");
 		return id.replace(re, "");
+	}
+
+	/**
+	 * Get System Longitude and Latitute
+	 *
+	 * @async
+	 * @returns {Promise<boolean>}
+	 */
+	async getSystemData() {
+		try {
+			const obj = await this.getForeignObjectAsync("system.config");
+
+			if (obj && obj.common) {
+				if (obj.common.longitude && obj.common.latitude) {
+					this.longitude = obj.common.longitude;
+					this.latitude = obj.common.latitude;
+
+					this.log.debug(`[ getSystemData ] longitude: ${this.longitude} | latitude: ${this.latitude}`);
+				} else {
+					this.log.warn(
+						"[ getSystemData ] System settings cannot be called up (Longitute, Latitude). Please check your ioBroker configuration!",
+					);
+				}
+
+				if (obj.common.dateFormat) {
+					this.dateFormat = obj.common.dateFormat;
+					this.log.debug(`[ getSystemData ] dateFormat: ${this.dateFormat}`);
+				} else {
+					this.dateFormat = "DD.MM.YYYY";
+					this.log.debug(`[ getSystemData ] dateFormat: ${this.dateFormat}`);
+				}
+			}
+			return true;
+		} catch (error) {
+			this.log.error(`[ v${this.version} getSystemData ] ${error}`);
+			return false;
+		}
 	}
 }
 
