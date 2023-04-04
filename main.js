@@ -37,46 +37,15 @@ class Timesanddates extends utils.Adapter {
 			await this.createObjects(objects);
 			await this.deleteNonExistentObjects(this.keepList);
 			const latlng = await this.getSystemData();
-			this.log.debug(JSON.stringify(this.states));
 
 			if (latlng) {
-				//const astroEvents = await this.getAstroEvents();
-				//this.scheduleForAstro();
+				this.scheduleForAstro();
 			}
 
-			await this.scheduleForTimes();
-			await this.scheduleForDates();
+			//await this.scheduleForTimes();
+			//await this.scheduleForDates();
 		} catch (error) {
 			this.log.error(`Could not create objects: ${error}`);
-		}
-	}
-
-	/**
-	 * Is called when adapter shuts down - callback has to be called under any circumstances!
-	 * @param {() => void} callback
-	 */
-	onUnload(callback) {
-		try {
-			schedule.gracefulShutdown();
-
-			callback();
-		} catch (e) {
-			callback();
-		}
-	}
-
-	/**
-	 * Is called if a subscribed state changes
-	 * @param {string} id
-	 * @param {ioBroker.State | null | undefined} state
-	 */
-	onStateChange(id, state) {
-		if (state) {
-			// The state was changed
-			this.log.info(`state ${id} changed: ${state.val} (ack = ${state.ack})`);
-		} else {
-			// The state was deleted
-			this.log.info(`state ${id} deleted`);
 		}
 	}
 
@@ -117,49 +86,65 @@ class Timesanddates extends utils.Adapter {
 	 */
 	async scheduleForAstro() {
 		const self = this;
-		this.scheduleForAstro = schedule.scheduleJob("* * * * *", async function () {
-			self.log.debug("[ scheduleForDates ] Set astro times");
+		const timeArray = await self.getAstroEvents();
+		if (Array.isArray(timeArray)) {
+			await self.setAstroTimes(timeArray);
+		}
+		// CRON every day at 0:00
+		this.scheduleForAstro = schedule.scheduleJob("0 0 * * *", async function () {
+			const timeArray = await self.getAstroEvents();
+			if (Array.isArray(timeArray)) {
+				await self.setAstroTimes(timeArray);
+			}
 		});
 	}
 
 	/**
-	 * Schedule astro events
-	 * @returns {Promise<void>}
+	 * Get Astro Events and sorted into array
+	 * @returns {(Promise<array | boolean>)}
 	 */
 	async getAstroEvents() {
-		const times = SunCalc.getTimes(new Date(), this.latitude, this.longitude);
+		try {
+			const times = SunCalc.getTimes(new Date(), this.latitude, this.longitude);
 
-		// Erstelle ein Array mit den Zeiten
-		const timeArray = Object.keys(times).map((key) => {
-			return { name: key, time: times[key] };
-		});
+			// Erstelle ein Array mit den Zeiten
+			const timeArray = Object.keys(times).map((key) => {
+				return { name: key, time: times[key] };
+			});
 
-		// Sortiere das Array nach der Uhrzeit
-		timeArray.sort((a, b) => {
-			return new Date(a.time).getTime() - new Date(b.time).getTime();
-		});
+			// Sortiere das Array nach der Uhrzeit
+			timeArray.sort((a, b) => {
+				return new Date(a.time).getTime() - new Date(b.time).getTime();
+			});
 
-		this.log.debug(`[ getAstroTimes ] ${JSON.stringify(timeArray)}`);
+			this.log.debug(`[ getAstroTimes ] sorted timeArray: ${JSON.stringify(timeArray)}`);
 
-		// Gehe alle Zeiten durch
-		timeArray.forEach((time) => {
-			this.log.debug(`[ getAstroTimes ] ${time.name}: ${time.time}`);
-		});
+			return timeArray;
+		} catch (error) {
+			this.log.error(`[ v${this.version} getAstroTimes ] Error by getting SunCalc Times: ${error}`);
+			return false;
+		}
+	}
 
-		this.states["04-sunrise"].set("01:00", true);
-
+	/**
+	 * set astro times
+	 * @async
+	 * @param {array} timeArray Array with all astro time by name and timeObject
+	 * @returns {Promise<void>}
+	 */
+	async setAstroTimes(timeArray) {
 		for (let i = 0; i < timeArray.length; i++) {
 			const astroTime = timeArray[i].time;
 			const date = new Date(astroTime);
-			const timeString = date.toLocaleTimeString(); // "hh:mm:ss AM/PM"
-			// @ts-ignore
-			const [time] = timeString.split(" "); // ["hh:mm:ss", "AM/PM"]
+			const hours = String(date.getHours()).padStart(2, "0");
+			const minutes = String(date.getMinutes()).padStart(2, "0");
+			const timeString = `${hours}:${minutes}`;
 
 			const timeName = timeArray[i].name;
 			const stateIndex = (i + 1).toString().padStart(2, "0"); // Index des States z.B. "01", "02", "03"
 			const stateName = `${stateIndex}-${timeName}`; // ID des States z.B. "Astro.Times.01-nightEnd"
 
-			this.states[stateName].set(time, true);
+			this.states[stateName].set(timeString, true);
 		}
 	}
 
@@ -325,6 +310,35 @@ class Timesanddates extends utils.Adapter {
 		} catch (error) {
 			this.log.error(`[ v${this.version} getSystemData ] ${error}`);
 			return false;
+		}
+	}
+
+	/**
+	 * Is called when adapter shuts down - callback has to be called under any circumstances!
+	 * @param {() => void} callback
+	 */
+	onUnload(callback) {
+		try {
+			schedule.gracefulShutdown();
+
+			callback();
+		} catch (e) {
+			callback();
+		}
+	}
+
+	/**
+	 * Is called if a subscribed state changes
+	 * @param {string} id
+	 * @param {ioBroker.State | null | undefined} state
+	 */
+	onStateChange(id, state) {
+		if (state) {
+			// The state was changed
+			this.log.info(`state ${id} changed: ${state.val} (ack = ${state.ack})`);
+		} else {
+			// The state was deleted
+			this.log.info(`state ${id} deleted`);
 		}
 	}
 }
