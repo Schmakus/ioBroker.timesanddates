@@ -86,22 +86,26 @@ class Timesanddates extends utils.Adapter {
 	 */
 	async scheduleForAstro() {
 		const self = this;
-		const timeArray = await self.getAstroEvents();
-		if (Array.isArray(timeArray)) {
-			await self.setAstroTimes(timeArray);
+		const astroTimes = await self.getAstroEvents();
+
+		if (typeof astroTimes !== "boolean") {
+			await self.setAstroTimes(astroTimes.timeArray);
+			await self.setAstroSchedules(astroTimes.times);
 		}
 		// CRON every day at 0:00
 		this.scheduleForAstro = schedule.scheduleJob("0 0 * * *", async function () {
-			const timeArray = await self.getAstroEvents();
-			if (Array.isArray(timeArray)) {
-				await self.setAstroTimes(timeArray);
+			const astroTimes = await self.getAstroEvents();
+
+			if (typeof astroTimes !== "boolean") {
+				await self.setAstroTimes(astroTimes.timeArray);
+				await self.setAstroSchedules(astroTimes.times);
 			}
 		});
 	}
 
 	/**
 	 * Get Astro Events and sorted into array
-	 * @returns {(Promise<array | boolean>)}
+	 * @returns {(Promise<object | boolean>)}
 	 */
 	async getAstroEvents() {
 		try {
@@ -119,7 +123,10 @@ class Timesanddates extends utils.Adapter {
 
 			this.log.debug(`[ getAstroTimes ] sorted timeArray: ${JSON.stringify(timeArray)}`);
 
-			return timeArray;
+			return {
+				timeArray: timeArray,
+				times: times,
+			};
 		} catch (error) {
 			this.log.error(`[ v${this.version} getAstroTimes ] Error by getting SunCalc Times: ${error}`);
 			return false;
@@ -144,7 +151,64 @@ class Timesanddates extends utils.Adapter {
 			const stateIndex = (i + 1).toString().padStart(2, "0"); // Index des States z.B. "01", "02", "03"
 			const stateName = `${stateIndex}-${timeName}`; // ID des States z.B. "Astro.Times.01-nightEnd"
 
-			this.states[stateName].set(timeString, true);
+			await this.states[stateName].set(timeString, true);
+		}
+		const sunset = timeArray.find((time) => time.name === "sunset").time;
+		const sunriseEnd = timeArray.find((time) => time.name === "sunriseEnd").time;
+
+		const now = new Date();
+
+		if (now >= new Date(sunriseEnd) && now <= new Date(sunset)) {
+			await this.states["Astroday"].set(true, true);
+		} else {
+			await this.states["Astroday"].set(false, true);
+		}
+
+		const season = await this.getCurrentSeason();
+		if (this.language === "de") {
+			await this.states["Season"].set(season.de, true);
+		} else {
+			await this.states["Season"].set(season.en, true);
+		}
+	}
+
+	/**
+	 * set astro schedules
+	 * @async
+	 * @param {object} times object with all astro times
+	 * @returns {Promise<void>}
+	 */
+	async setAstroSchedules(times) {
+		this.log.debug(`[ setAstroSchedules ] ${JSON.stringify(times)}`);
+	}
+
+	/**
+	 * get current season
+	 * @async
+	 * @returns {Promise<object>}
+	 */
+	async getCurrentSeason() {
+		const month = new Date().getMonth() + 1;
+		if (month >= 3 && month <= 5) {
+			return {
+				en: "Spring",
+				de: "Frühling",
+			};
+		} else if (month >= 6 && month <= 8) {
+			return {
+				en: "Summer",
+				de: "Sommer",
+			};
+		} else if (month >= 9 && month <= 11) {
+			return {
+				en: "Autumn",
+				de: "Herbst",
+			};
+		} else {
+			return {
+				en: "Winter",
+				de: "Winter",
+			};
 		}
 	}
 
@@ -304,6 +368,12 @@ class Timesanddates extends utils.Adapter {
 				} else {
 					this.dateFormat = "DD.MM.YYYY";
 					this.log.debug(`[ getSystemData ] dateFormat: ${this.dateFormat}`);
+				}
+
+				if (obj.common.language) {
+					this.language = obj.common.language;
+				} else {
+					this.language = "de";
 				}
 			}
 			return true;
