@@ -38,15 +38,33 @@ class Timesanddates extends utils.Adapter {
 			await this.deleteNonExistentObjects(this.keepList);
 			const latlng = await this.getSystemData();
 
-			if (latlng) {
-				this.scheduleForAstro();
-			}
+			await this.handleEvents(latlng);
 
 			//await this.scheduleForTimes();
 			//await this.scheduleForDates();
 		} catch (error) {
 			this.log.error(`Could not create objects: ${error}`);
 		}
+	}
+
+	/**
+	 * Go for it
+	 * @async
+	 * @param {boolean} latlng
+	 * @returns {Promise<void>}
+	 */
+	async handleEvents(latlng) {
+		if (!latlng) {
+			return;
+		}
+		const astroTimes = await this.getAstroEvents();
+		if (typeof astroTimes !== "boolean") {
+			await this.setCurrentDaytime(astroTimes.timeArray);
+			await this.setCurrentSeason();
+			await this.setAstroTimes(astroTimes.timeArray);
+			await this.setAstroSchedules(astroTimes.times);
+		}
+		this.scheduleForAstro();
 	}
 
 	/**
@@ -86,19 +104,12 @@ class Timesanddates extends utils.Adapter {
 	 */
 	async scheduleForAstro() {
 		const self = this;
-		const astroTimes = await self.getAstroEvents();
-
-		if (typeof astroTimes !== "boolean") {
-			await self.setAstroTimes(astroTimes.timeArray);
-			await self.setAstroSchedules(astroTimes.times);
-		}
 		// CRON every day at 0:00
 		this.scheduleForAstro = schedule.scheduleJob("0 0 * * *", async function () {
 			const astroTimes = await self.getAstroEvents();
-
 			if (typeof astroTimes !== "boolean") {
 				await self.setAstroTimes(astroTimes.timeArray);
-				await self.setAstroSchedules(astroTimes.times);
+				await self.setCurrentSeason();
 			}
 		});
 	}
@@ -153,23 +164,6 @@ class Timesanddates extends utils.Adapter {
 
 			await this.states[stateName].set(timeString, true);
 		}
-		const sunset = timeArray.find((time) => time.name === "sunset").time;
-		const sunriseEnd = timeArray.find((time) => time.name === "sunriseEnd").time;
-
-		const now = new Date();
-
-		if (now >= new Date(sunriseEnd) && now <= new Date(sunset)) {
-			await this.states["Astroday"].set(true, true);
-		} else {
-			await this.states["Astroday"].set(false, true);
-		}
-
-		const season = await this.getCurrentSeason();
-		if (this.language === "de") {
-			await this.states["Season"].set(season.de, true);
-		} else {
-			await this.states["Season"].set(season.en, true);
-		}
 	}
 
 	/**
@@ -183,33 +177,45 @@ class Timesanddates extends utils.Adapter {
 	}
 
 	/**
-	 * get current season
+	 * Set current daytime
 	 * @async
-	 * @returns {Promise<object>}
+	 * @returns {Promise<void>}
 	 */
-	async getCurrentSeason() {
-		const month = new Date().getMonth() + 1;
-		if (month >= 3 && month <= 5) {
-			return {
-				en: "Spring",
-				de: "Frühling",
-			};
-		} else if (month >= 6 && month <= 8) {
-			return {
-				en: "Summer",
-				de: "Sommer",
-			};
-		} else if (month >= 9 && month <= 11) {
-			return {
-				en: "Autumn",
-				de: "Herbst",
-			};
+	async setCurrentDaytime(timeArray) {
+		const sunset = timeArray.find((time) => time.name === "sunset").time;
+		const sunriseEnd = timeArray.find((time) => time.name === "sunriseEnd").time;
+
+		const now = new Date();
+
+		if (now >= new Date(sunriseEnd) && now <= new Date(sunset)) {
+			await this.states["Astroday"].set(true, true);
 		} else {
-			return {
-				en: "Winter",
-				de: "Winter",
-			};
+			await this.states["Astroday"].set(false, true);
 		}
+	}
+
+	/**
+	 * Set current season
+	 * @async
+	 * @returns {Promise<void>}
+	 */
+	async setCurrentSeason() {
+		const month = new Date().getMonth() + 1;
+		const getSeason = function (month) {
+			if (month >= 3 && month <= 5) {
+				return { en: "Spring", de: "Frühling" };
+			} else if (month >= 6 && month <= 8) {
+				return { en: "Summer", de: "Sommer" };
+			} else if (month >= 9 && month <= 11) {
+				return { en: "Autumn", de: "Herbst" };
+			} else {
+				return { en: "Winter", de: "Winter" };
+			}
+		};
+
+		const season = getSeason(month);
+
+		await this.states["Season"].set(this.language === "de" ? season.de : season.en, true);
 	}
 
 	/**
