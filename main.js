@@ -13,6 +13,7 @@ const schedule = require("node-schedule");
 const SunCalc = require("suncalc2");
 
 const objects = require("./lib/objects.js");
+const daytimes = require("./lib/daytimes.js");
 class Timesanddates extends utils.Adapter {
 	/**
 	 * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -27,6 +28,7 @@ class Timesanddates extends utils.Adapter {
 
 		this.states = {};
 		this.keepList = [];
+		this.astroScheduleJobs = {};
 	}
 
 	/**
@@ -34,14 +36,15 @@ class Timesanddates extends utils.Adapter {
 	 */
 	async onReady() {
 		try {
+			//Init
 			await this.createObjects(objects);
 			await this.deleteNonExistentObjects(this.keepList);
+
+			//Get position from system data
 			const latlng = await this.getSystemData();
 
+			//Set schedules
 			await this.handleEvents(latlng);
-
-			//await this.scheduleForTimes();
-			//await this.scheduleForDates();
 		} catch (error) {
 			this.log.error(`Could not create objects: ${error}`);
 		}
@@ -57,14 +60,16 @@ class Timesanddates extends utils.Adapter {
 		if (!latlng) {
 			return;
 		}
-		const astroTimes = await this.getAstroEvents();
+		const astroTimes = await this.getAstroEvents(); // Heutige Astrozeiten
+
 		if (typeof astroTimes !== "boolean") {
 			await this.setCurrentDaytime(astroTimes.timeArray);
 			await this.setCurrentSeason();
 			await this.setAstroTimes(astroTimes.timeArray);
-			await this.setAstroSchedules(astroTimes.times);
+			await this.setAstroSchedules(astroTimes.timeArray);
 		}
 		this.scheduleForAstro();
+		this.scheduleForTimes();
 	}
 
 	/**
@@ -75,9 +80,14 @@ class Timesanddates extends utils.Adapter {
 	 * @returns {Promise<void>}
 	 */
 	async scheduleForTimes() {
+		if (this.scheduleJobForTimes) {
+			this.scheduleJobForTimes.cancel();
+		}
+		await this.setTimes();
 		const self = this;
-		this.scheduleForTimes = schedule.scheduleJob("* * * * *", async function () {
-			self.log.debug("[ scheduleForTimes ] Diese Funktion wird jede Minute aufgerufen!");
+		this.scheduleJobForTimes = schedule.scheduleJob("* * * * *", async function () {
+			self.setTimes();
+			self.log.debug("[ scheduleForTimes ] Uhrzeit aktualisiert");
 		});
 	}
 
@@ -90,7 +100,7 @@ class Timesanddates extends utils.Adapter {
 	 */
 	async scheduleForDates() {
 		const self = this;
-		this.scheduleForDates = schedule.scheduleJob("* * * * *", async function () {
+		this.scheduleJobForDates = schedule.scheduleJob("* * * * *", async function () {
 			self.log.debug("[ scheduleForDates ] Diese Funktion wird jede Minute aufgerufen!");
 		});
 	}
@@ -116,11 +126,12 @@ class Timesanddates extends utils.Adapter {
 
 	/**
 	 * Get Astro Events and sorted into array
+	 * @param {Date} [date=new Date()] - The date for which to calculate the astro events
 	 * @returns {(Promise<object | boolean>)}
 	 */
-	async getAstroEvents() {
+	async getAstroEvents(date = new Date()) {
 		try {
-			const times = SunCalc.getTimes(new Date(), this.latitude, this.longitude);
+			const times = SunCalc.getTimes(date, this.latitude, this.longitude);
 
 			// Erstelle ein Array mit den Zeiten
 			const timeArray = Object.keys(times).map((key) => {
@@ -167,14 +178,250 @@ class Timesanddates extends utils.Adapter {
 	}
 
 	/**
-	 * set astro schedules
+	 * Set astro schedules
 	 * @async
-	 * @param {object} times object with all astro times
+	 * @function
+	 * @param {array} timeArray Array with all Astro times
 	 * @returns {Promise<void>}
 	 */
-	async setAstroSchedules(times) {
-		this.log.debug(`[ setAstroSchedules ] ${JSON.stringify(times)}`);
+	async setAstroSchedules(timeArray) {
+		let counter = 0;
+		const newDaytimes = {};
+
+		for (const daytime of daytimes) {
+			if (this.astroScheduleJobs[daytime.name]) {
+				this.astroScheduleJobs[daytime.name].cancel();
+			}
+			const event = timeArray.find((event) => event.name === daytime.time);
+			const scheduleTime = new Date(event.time);
+			scheduleTime.setMinutes(scheduleTime.getMinutes() + daytime.shift);
+
+			newDaytimes[daytime.name] = scheduleTime;
+
+			this.astroScheduleJobs[daytime.name] = schedule.scheduleJob(scheduleTime, async () => {
+				await this.newDaytime(counter);
+				this.log.debug(`[ setAstroSchedules ] reached schedule for ${daytime.name} (${daytime.time})`);
+				const nextDay = new Date();
+				nextDay.setDate(nextDay.getDate() + 1);
+				const timeArray = (await this.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+				const event = timeArray.find((event) => event.name === daytime.time);
+				const scheduleTime = new Date(event.time);
+				scheduleTime.setMinutes(scheduleTime.getMinutes() + daytime.shift);
+				this.astroScheduleJobs[daytime.name].reschedule(scheduleTime);
+			});
+
+			counter++;
+			this.log.debug(`[ setAstroSchedules ] schedule for ${daytime.name} (${daytime.time}) was set`);
+		}
+
+		//Set actual an next daytime
+		const now = new Date();
+
+		if (now >= new Date(newDaytimes.Dusk)) {
+			await this.newDaytime(9);
+		} else if (now >= new Date(newDaytimes.Sunset)) {
+			await this.newDaytime(8);
+		} else if (now >= new Date(newDaytimes.Evening)) {
+			await this.newDaytime(7);
+		} else if (now >= new Date(newDaytimes.Afternoon)) {
+			await this.newDaytime(6);
+		} else if (now >= new Date(newDaytimes.Midday)) {
+			await this.newDaytime(5);
+		} else if (now >= new Date(newDaytimes.LateMorning)) {
+			await this.newDaytime(4);
+		} else if (now >= new Date(newDaytimes.Morning)) {
+			await this.newDaytime(3);
+		} else if (now >= new Date(newDaytimes.Sunrise)) {
+			await this.newDaytime(2);
+		} else if (now >= new Date(newDaytimes.Dawn)) {
+			await this.newDaytime(1);
+		} else if (now >= new Date(newDaytimes.Night)) {
+			await this.newDaytime(0);
+		}
 	}
+
+	/*
+	async scheduleForNauticalDusk(timeArray) {
+		if (this.scheduleJobForNauticalDusk) {
+			this.scheduleJobForNauticalDusk.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "nauticalDusk");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() + 45);
+
+		const self = this;
+
+		this.scheduleJobForNauticalDusk = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(0);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForNauticalDusk(timeArray);
+		});
+	}
+	async scheduleForNauticalDawn(timeArray) {
+		if (this.scheduleJobForNauticalDawn) {
+			this.scheduleJobForNauticalDawn.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "nauticalDawn");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() - 45);
+
+		const self = this;
+
+		this.scheduleJobForNauticalDawn = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(1);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForNauticalDawn(timeArray);
+		});
+	}
+	async scheduleForSunrise(timeArray) {
+		if (this.scheduleJobForSunrise) {
+			this.scheduleJobForSunrise.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "sunrise");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() + 0);
+
+		const self = this;
+
+		this.scheduleJobForSunrise = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(2);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForSunrise(timeArray);
+		});
+	}
+	async scheduleForSunriseEnd(timeArray) {
+		if (this.scheduleJobForSunriseEnd) {
+			this.scheduleJobForSunriseEnd.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "sunriseEnd");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() + 0);
+
+		const self = this;
+
+		this.scheduleJobForSunriseEnd = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(3);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForSunriseEnd(timeArray);
+		});
+	}
+	async scheduleForGoldenHourEnd(timeArray) {
+		if (this.scheduleJobForGoldenHourEnd) {
+			this.scheduleJobForGoldenHourEnd.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "goldenHourEnd");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() + 60);
+
+		const self = this;
+
+		this.scheduleJobForGoldenHourEnd = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(4);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForGoldenHourEnd(timeArray);
+		});
+	}
+	async scheduleForSolarNoon(timeArray) {
+		if (this.scheduleJobForSolarNoon) {
+			this.scheduleJobForSolarNoon.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "solarNoon");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() - 30);
+
+		const self = this;
+
+		this.scheduleJobForSolarNoon = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(5);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForSolarNoon(timeArray);
+		});
+	}
+	async scheduleForAfterNoon(timeArray) {
+		if (this.scheduleJobForAfterNoon) {
+			this.scheduleJobForAfterNoon.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "solarNoon");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() + 30);
+
+		const self = this;
+
+		this.scheduleJobForAfterNoon = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(6);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForAfterNoon(timeArray);
+		});
+	}
+	async scheduleForGoldenHour(timeArray) {
+		if (this.scheduleJobForGoldenHour) {
+			this.scheduleJobForGoldenHour.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "goldenHour");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() - 60);
+
+		const self = this;
+
+		this.scheduleJobForGoldenHour = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(7);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForGoldenHour(timeArray);
+		});
+	}
+	async scheduleForSunsetStart(timeArray) {
+		if (this.scheduleJobForSunsetStart) {
+			this.scheduleJobForSunsetStart.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "sunsetStart");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() + 0);
+
+		const self = this;
+
+		this.scheduleJobForSunsetStart = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(8);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForSunsetStart(timeArray);
+		});
+	}
+	async scheduleForSunset(timeArray) {
+		if (this.scheduleJobForSunset) {
+			this.scheduleJobForSunset.cancel();
+		}
+		const event = timeArray.find((event) => event.name === "sunset");
+		const scheduleTime = new Date(event.time);
+		scheduleTime.setMinutes(scheduleTime.getMinutes() + 0);
+
+		const self = this;
+
+		this.scheduleJobForSunset = schedule.scheduleJob(scheduleTime, async function () {
+			await self.newDaytime(9);
+			const nextDay = new Date();
+			nextDay.setDate(nextDay.getDate() + 1);
+			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
+			await self.scheduleForSunset(timeArray);
+		});
+	}
+	*/
 
 	/**
 	 * Set current daytime
@@ -216,6 +463,42 @@ class Timesanddates extends utils.Adapter {
 		const season = getSeason(month);
 
 		await this.states["Season"].set(this.language === "de" ? season.de : season.en, true);
+	}
+
+	/**
+	 * Set current and actual daytime
+	 * @async
+	 * @function
+	 * @param {any} daytime
+	 * @returns {Promise<void>}
+	 * @description "daytimes" beinhaltet die folgenden Tageszeiten: Nacht, Morgendämmerung, Sonnenaufgang, Morgen, Vormittag, Mittag, Nachmittag, Abend, Sonnenuntergang, Abenddämmerung.
+	 */
+	async newDaytime(daytime) {
+		const current = daytimes[parseInt(daytime, 10)];
+		const next = daytime + 1 === daytime.length ? daytimes[0] : daytimes[parseInt(daytime + 1, 10)];
+		await this.states["currentDaytime"].set(this.language === "de" ? current.de : current.en, true);
+		await this.states["nextDaytime"].set(this.language === "de" ? next.de : next.en, true);
+
+		this.log.debug(`[ newDaytime ] current: '${current}}, next: ${next}`);
+	}
+
+	/**
+	 * Set Times
+	 *
+	 * @async
+	 * @returns {Promise<void>} - Resolves when all objects have been created.
+	 */
+	async setTimes() {
+		const date = new Date();
+		const hours = date.getHours().toString().padStart(2, "0");
+		const minutes = date.getMinutes().toString().padStart(2, "0");
+		const currentTime = `${hours}:${minutes}`;
+
+		await Promise.all([
+			this.states["currentTime"].set(currentTime, true),
+			this.states["currentMinute"].set(minutes, true),
+			this.states["currentHour"].set(hours, true),
+		]);
 	}
 
 	/**
