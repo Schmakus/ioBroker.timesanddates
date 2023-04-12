@@ -13,7 +13,8 @@ const schedule = require("node-schedule");
 const SunCalc = require("suncalc2");
 
 const objects = require("./lib/objects.js");
-const daytimes = require("./lib/daytimes.js");
+const { daytimes } = require("./lib/daytimes.js");
+
 class Timesanddates extends utils.Adapter {
 	/**
 	 * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -185,10 +186,7 @@ class Timesanddates extends utils.Adapter {
 	 * @returns {Promise<void>}
 	 */
 	async setAstroSchedules(timeArray) {
-		let counter = 0;
-		const newDaytimes = {};
-
-		for (const daytime of daytimes) {
+		for (const [index, daytime] of daytimes.entries()) {
 			if (this.astroScheduleJobs[daytime.name]) {
 				this.astroScheduleJobs[daytime.name].cancel();
 			}
@@ -196,10 +194,10 @@ class Timesanddates extends utils.Adapter {
 			const scheduleTime = new Date(event.time);
 			scheduleTime.setMinutes(scheduleTime.getMinutes() + daytime.shift);
 
-			newDaytimes[daytime.name] = scheduleTime;
+			daytime.scheduleTime = scheduleTime;
 
 			this.astroScheduleJobs[daytime.name] = schedule.scheduleJob(scheduleTime, async () => {
-				await this.newDaytime(counter);
+				await this.newDaytime(index);
 				this.log.debug(`[ setAstroSchedules ] reached schedule for ${daytime.name} (${daytime.time})`);
 				const nextDay = new Date();
 				nextDay.setDate(nextDay.getDate() + 1);
@@ -210,218 +208,19 @@ class Timesanddates extends utils.Adapter {
 				this.astroScheduleJobs[daytime.name].reschedule(scheduleTime);
 			});
 
-			counter++;
 			this.log.debug(`[ setAstroSchedules ] schedule for ${daytime.name} (${daytime.time}) was set`);
 		}
 
 		//Set actual an next daytime
 		const now = new Date();
 
-		if (now >= new Date(newDaytimes.Dusk)) {
-			await this.newDaytime(9);
-		} else if (now >= new Date(newDaytimes.Sunset)) {
-			await this.newDaytime(8);
-		} else if (now >= new Date(newDaytimes.Evening)) {
-			await this.newDaytime(7);
-		} else if (now >= new Date(newDaytimes.Afternoon)) {
-			await this.newDaytime(6);
-		} else if (now >= new Date(newDaytimes.Midday)) {
-			await this.newDaytime(5);
-		} else if (now >= new Date(newDaytimes.LateMorning)) {
-			await this.newDaytime(4);
-		} else if (now >= new Date(newDaytimes.Morning)) {
-			await this.newDaytime(3);
-		} else if (now >= new Date(newDaytimes.Sunrise)) {
-			await this.newDaytime(2);
-		} else if (now >= new Date(newDaytimes.Dawn)) {
-			await this.newDaytime(1);
-		} else if (now >= new Date(newDaytimes.Night)) {
-			await this.newDaytime(0);
+		for (let i = 9; i >= 0; i--) {
+			if (now >= new Date(daytimes[i].scheduleTime)) {
+				await this.newDaytime(i);
+				break;
+			}
 		}
 	}
-
-	/*
-	async scheduleForNauticalDusk(timeArray) {
-		if (this.scheduleJobForNauticalDusk) {
-			this.scheduleJobForNauticalDusk.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "nauticalDusk");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() + 45);
-
-		const self = this;
-
-		this.scheduleJobForNauticalDusk = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(0);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForNauticalDusk(timeArray);
-		});
-	}
-	async scheduleForNauticalDawn(timeArray) {
-		if (this.scheduleJobForNauticalDawn) {
-			this.scheduleJobForNauticalDawn.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "nauticalDawn");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() - 45);
-
-		const self = this;
-
-		this.scheduleJobForNauticalDawn = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(1);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForNauticalDawn(timeArray);
-		});
-	}
-	async scheduleForSunrise(timeArray) {
-		if (this.scheduleJobForSunrise) {
-			this.scheduleJobForSunrise.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "sunrise");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() + 0);
-
-		const self = this;
-
-		this.scheduleJobForSunrise = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(2);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForSunrise(timeArray);
-		});
-	}
-	async scheduleForSunriseEnd(timeArray) {
-		if (this.scheduleJobForSunriseEnd) {
-			this.scheduleJobForSunriseEnd.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "sunriseEnd");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() + 0);
-
-		const self = this;
-
-		this.scheduleJobForSunriseEnd = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(3);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForSunriseEnd(timeArray);
-		});
-	}
-	async scheduleForGoldenHourEnd(timeArray) {
-		if (this.scheduleJobForGoldenHourEnd) {
-			this.scheduleJobForGoldenHourEnd.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "goldenHourEnd");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() + 60);
-
-		const self = this;
-
-		this.scheduleJobForGoldenHourEnd = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(4);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForGoldenHourEnd(timeArray);
-		});
-	}
-	async scheduleForSolarNoon(timeArray) {
-		if (this.scheduleJobForSolarNoon) {
-			this.scheduleJobForSolarNoon.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "solarNoon");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() - 30);
-
-		const self = this;
-
-		this.scheduleJobForSolarNoon = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(5);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForSolarNoon(timeArray);
-		});
-	}
-	async scheduleForAfterNoon(timeArray) {
-		if (this.scheduleJobForAfterNoon) {
-			this.scheduleJobForAfterNoon.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "solarNoon");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() + 30);
-
-		const self = this;
-
-		this.scheduleJobForAfterNoon = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(6);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForAfterNoon(timeArray);
-		});
-	}
-	async scheduleForGoldenHour(timeArray) {
-		if (this.scheduleJobForGoldenHour) {
-			this.scheduleJobForGoldenHour.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "goldenHour");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() - 60);
-
-		const self = this;
-
-		this.scheduleJobForGoldenHour = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(7);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForGoldenHour(timeArray);
-		});
-	}
-	async scheduleForSunsetStart(timeArray) {
-		if (this.scheduleJobForSunsetStart) {
-			this.scheduleJobForSunsetStart.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "sunsetStart");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() + 0);
-
-		const self = this;
-
-		this.scheduleJobForSunsetStart = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(8);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForSunsetStart(timeArray);
-		});
-	}
-	async scheduleForSunset(timeArray) {
-		if (this.scheduleJobForSunset) {
-			this.scheduleJobForSunset.cancel();
-		}
-		const event = timeArray.find((event) => event.name === "sunset");
-		const scheduleTime = new Date(event.time);
-		scheduleTime.setMinutes(scheduleTime.getMinutes() + 0);
-
-		const self = this;
-
-		this.scheduleJobForSunset = schedule.scheduleJob(scheduleTime, async function () {
-			await self.newDaytime(9);
-			const nextDay = new Date();
-			nextDay.setDate(nextDay.getDate() + 1);
-			const timeArray = (await self.getAstroEvents(nextDay)).timeArray; // Astrozeiten für morgen
-			await self.scheduleForSunset(timeArray);
-		});
-	}
-	*/
 
 	/**
 	 * Set current daytime
