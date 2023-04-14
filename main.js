@@ -37,6 +37,17 @@ class Timesanddates extends utils.Adapter {
 	 */
 	async onReady() {
 		try {
+			//check objects.js
+			const duplicates = await this.findDuplicateStates(objects);
+			if (duplicates.length > 0) {
+				this.log.warn(
+					`[ onReady ] Duplicate state names found in objects.js, adapter will stop: ${duplicates.join(
+						", ",
+					)}`,
+				);
+				this.stop;
+				return;
+			}
 			//Init
 			await this.createObjects(objects);
 			await this.deleteNonExistentObjects(this.keepList);
@@ -273,12 +284,16 @@ class Timesanddates extends utils.Adapter {
 	 * @description "daytimes" beinhaltet die folgenden Tageszeiten: Nacht, Morgendämmerung, Sonnenaufgang, Morgen, Vormittag, Mittag, Nachmittag, Abend, Sonnenuntergang, Abenddämmerung.
 	 */
 	async newDaytime(daytime) {
-		const current = daytimes[parseInt(daytime, 10)];
-		const next = daytime + 1 === daytime.length ? daytimes[0] : daytimes[parseInt(daytime + 1, 10)];
-		await this.states["currentDaytime"].set(this.language === "de" ? current.de : current.en, true);
-		await this.states["nextDaytime"].set(this.language === "de" ? next.de : next.en, true);
+		try {
+			const current = daytimes[parseInt(daytime, 10)];
+			const next = daytime + 1 === daytimes.length ? daytimes[0] : daytimes[parseInt(daytime + 1, 10)];
+			await this.states["currentDaytime"].set(this.language === "de" ? current.de : current.en, true);
+			await this.states["nextDaytime"].set(this.language === "de" ? next.de : next.en, true);
 
-		this.log.debug(`[ newDaytime ] current: '${current}}, next: ${next}`);
+			this.log.debug(`[ newDaytime ] current: ${current}}, next: ${next}`);
+		} catch (error) {
+			this.log.error(`[ newDaytime ] ${error}`);
+		}
 	}
 
 	/**
@@ -309,8 +324,6 @@ class Timesanddates extends utils.Adapter {
 	 * @returns {Promise<void>} - Resolves when all objects have been created.
 	 */
 	async createObjects(objects, parent) {
-		this.log.debug(`[ createObjects ] Reaching`);
-
 		for (const [key, value] of Object.entries(objects)) {
 			const objectKey = parent ? `${parent}.${key}` : key;
 
@@ -426,6 +439,32 @@ class Timesanddates extends utils.Adapter {
 	async removeNamespace(id) {
 		const re = new RegExp(this.namespace + "*\\.", "g");
 		return id.replace(re, "");
+	}
+
+	/**
+	 * Check for duplicates in objects.js
+	 *
+	 * @async
+	 * @function
+	 * @param {object} obj Object with all states
+	 * @returns {Promise<any>} The ID without the adapter's namespace.
+	 */
+	async findDuplicateStates(obj, stateSet = new Set(), duplicates = []) {
+		for (const key in obj) {
+			const value = obj[key];
+			if (typeof value === "object") {
+				if (value.type === "state") {
+					if (stateSet.has(key)) {
+						duplicates.push(key);
+					} else {
+						stateSet.add(key);
+					}
+				} else {
+					await this.findDuplicateStates(value, stateSet, duplicates);
+				}
+			}
+		}
+		return duplicates;
 	}
 
 	/**
